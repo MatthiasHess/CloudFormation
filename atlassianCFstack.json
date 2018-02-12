@@ -1,0 +1,800 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "sets up a devtools stack whith Jira, Confluence, Bitbucket and Jenkins using Docker",
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Network Configuration"
+          },
+          "Parameters": [
+            "VPC",
+            "Subnet"
+          ]
+        },
+        {
+          "Label": {
+            "default": "EC2 Configuration"
+          },
+          "Parameters": [
+            "AMI",
+            "KeyPair",
+            "AtlassianInstanceClass",
+            "JenkinsInstanceClass",
+            "EC2AdminUsername",
+            "EC2AdminPassword"
+          ]
+        }
+      ],
+      "ParameterLabels": {
+        "VPC": {
+          "default": "Which VPC should this be deployed to?"
+        }
+      }
+    }
+  },
+  "Parameters": {
+    "VPC": {
+      "Description": "VpcId of your existing Virtual Private Cloud (VPC)",
+      "Type": "AWS::EC2::VPC::Id",
+      "Default": "vpc-7f550a06"
+    },
+    "Subnet": {
+      "Description": "The list of SubnetIds in your Virtual Private Cloud (VPC)",
+      "Type": "AWS::EC2::Subnet::Id",
+      "Default": "subnet-b8ff39dc"
+    },
+    "AMI": {
+      "Description": "The AMI that you use for your EC2",
+      "Type": "AWS::EC2::Image::Id",
+      "Default": "ami-1d46df64"
+    },
+    "KeyPair": {
+      "Default": "DevOps_Atlassian_Test",
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "MinLength": "1",
+      "ConstraintDescription": "Must be list of EC2 key pairs"
+    },
+    "AtlassianInstanceClass": {
+      "Description": "EC2 instance type to host Jira, Confluence and Bitbucket",
+      "Type": "String",
+      "Default": "m5.large",
+      "AllowedValues": [
+        "t2.nano",
+        "t2.micro",
+        "t2.medium",
+        "t2.small",
+        "t2.large",
+        "m5.large"
+      ],
+      "ConstraintDescription": "Must be a valid EC2 instance type."
+    },
+    "JenkinsInstanceClass": {
+      "Description": "EC2 instance type to host Jenkins",
+      "Type": "String",
+      "Default": "t2.medium",
+      "AllowedValues": [
+        "t2.nano",
+        "t2.micro",
+        "t2.medium",
+        "t2.small",
+        "t2.large",
+        "m5.large"
+      ],
+      "ConstraintDescription": "Must be a valid EC2 instance type."
+    },
+    "EC2AdminUsername": {
+      "Description": "The EC2 admin account username",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "16",
+      "Default": "mhess"
+    },
+    "EC2AdminPassword": {
+      "NoEcho": "true",
+      "Description": "The EC2 admin account password",
+      "Type": "String",
+      "MinLength": "1"
+    }
+  },
+  "Resources": {
+    "SecurityGroupAtlassian": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupName": "sgEc2Atlassain",
+        "GroupDescription": "Security group for Atlassian server",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8080,
+            "ToPort": 8080,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8090,
+            "ToPort": 8091,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 7990,
+            "ToPort": 7990,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 7999,
+            "ToPort": 7999,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "ToPort": 22,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    },
+    "Ec2InstanceAtlassian": {
+      "Type": "AWS::EC2::Instance",
+      "Metadata": {
+        "Comment": "EC2 instance to host atlassian in docker containers",
+        "Version": "1.0.0-SNAPSHOT",
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "InstallAndRun": [
+              "1-cfn-base-setup",
+              "2-cfn-base-configuration",
+              "3-cfn-setup",
+              "4-cfn-start-docker-service",
+              "5-cfn-jira-docker",
+              "6-cfn-confluence-docker",
+              "7-cfn-bitbucket-docker"
+            ]
+          },
+          "1-cfn-base-setup": {
+            "packages": {
+              "yum": {
+                "mc": [],
+                "docker": []
+              }
+            },
+            "files": {
+              "/etc/cfn/cfn-hup.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "[main]\n",
+                      "stack=",
+                      {
+                        "Ref": "AWS::StackId"
+                      },
+                      "\n",
+                      "region=",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n"
+                    ]
+                  ]
+                },
+                "mode": "000400",
+                "owner": "root",
+                "group": "root"
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "[cfn-auto-reloader-hook]\n",
+                      "triggers=post.update\n",
+                      "path=Resources.Ec2Instance.Metadata.AWS::CloudFormation::Init\n",
+                      "action=/opt/aws/bin/cfn-init -v ",
+                      "         --stack ",
+                      {
+                        "Ref": "AWS::StackName"
+                      },
+                      "         --resource Ec2InstanceAtlassian ",
+                      "         --configsets InstallAndRun ",
+                      "         --region ",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n",
+                      "runas=root\n"
+                    ]
+                  ]
+                }
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "cfn-hup": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": [
+                    "/etc/cfn/cfn-hup.conf",
+                    "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                  ]
+                }
+              }
+            }
+          },
+          "2-cfn-base-configuration": {
+            "commands": {
+              "01_01_change_time_zone_to_berlin": {
+                "command": "sed -i 's,^\\(ZONE=\\).*,\\1'Europe/Berlin',' /etc/sysconfig/clock"
+              },
+              "01_02_change_time_zone_to_berlin": {
+                "command": "ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime"
+              },
+              "02_01_enable_ssh_password_authentication": {
+                "command": "sed -i 's/^PasswordAuthentication .*/PasswordAuthentication yes/g' /etc/ssh/sshd_config"
+              },
+              "02_02_enable_member_of_wheel_group_to_run_all_commands": {
+                "command": "sed -i 's/^#\\s*\\(%wheel\\s\\+ALL=(ALL)\\s\\+ALL\\)/\\1/' /etc/sudoers"
+              },
+              "02_03_restart_sshd_service": {
+                "command": "service sshd restart"
+              },
+              "03_01_add_additional_admin_user": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "useradd -m -d /home/",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      },
+                      " ",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      }
+                    ]
+                  ]
+                }
+              },
+              "03_02_set_admin_user_password": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "echo ",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      },
+                      ":",
+                      {
+                        "Ref": "EC2AdminPassword"
+                      },
+                      " | ",
+                      "chpasswd"
+                    ]
+                  ]
+                }
+              },
+              "03_03_add_user_to_admin_group": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "usermod -a -G wheel ",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          "3-cfn-setup": {
+            "commands": {
+              "02_01_format_the_addition_volume": {
+                "command": "sudo mkfs -t ext4 /dev/sdh"
+              },
+              "02_02_create_application_directory": {
+                "command": ""
+              },
+              "02_03_add_entry_to_fstab": {
+                "command": "echo \"/dev/sdh /opt ext4 defaults,nofail,noatime 1 2\" >> /etc/fstab"
+              },
+              "02_04_add_entry_to_fstab": {
+                "command": "mount -a"
+              }
+            }
+          },
+          "4-cfn-start-docker-service": {
+            "commands": {
+              "01_register_docker_service": {
+                "command": "chkconfig --add docker"
+              },
+              "02_start_docker_service": {
+                "command": "service docker start"
+              }
+            }
+          },
+          "5-cfn-jira-docker": {
+            "commands": {
+              "01_pull_docker_image": {
+                "command": "docker pull cptactionhank/atlassian-jira-software"
+              },
+              "02_start_docker_image": {
+                "command": "docker run -dit --restart=always --name jira-instance --publish 8080:8080 -v /opt/jira:/var/atlassian/jira -d cptactionhank/atlassian-jira-software"
+              },
+              "03_fix_jira_home_permissions": {
+                "command": "docker exec -u 0 -i jira-instance chmod -R o+w /var/atlassian/"
+              }
+            }
+          },
+          "6-cfn-confluence-docker": {
+            "commands": {
+              "01_pull_docker_image": {
+                "command": "docker pull atlassian/confluence-server"
+              },
+              "02_start_docker_image": {
+                "command": "docker run -dit --restart=always --name confluence-instance --publish 8090:8090 --publish 8091:8091 -v /opt/confluence:/var/atlassian/application-data/confluence -d atlassian/confluence-server"
+              }
+            }
+          },
+          "7-cfn-bitbucket-docker": {
+            "commands": {
+              "01_pull_docker_image": {
+                "command": "docker pull atlassian/bitbucket-server"
+              },
+              "02_start_docker_image": {
+                "command": "docker run -dit --restart=always --name bitbucket-instance --publish 7990:7990 --publish 7999:7999 -v /opt/bitbucket:/var/atlassian/application-data/bitbucket -d atlassian/bitbucket-server"
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": {
+          "Ref": "AMI"
+        },
+        "InstanceType": {
+          "Ref": "AtlassianInstanceClass"
+        },
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "SecurityGroupAtlassian"
+          }
+        ],
+        "SubnetId": {
+          "Ref": "Subnet"
+        },
+        "Tenancy": "default",
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -v\n",
+                "source /etc/environment\n",
+                "# Wait for the EBS volume to show up\n",
+                "while [ ! -e /dev/sdh ]; do echo waiting for /dev/sdh to attach; sleep 10; done\n",
+                "yum update -y && yum install -y aws-cfn-bootstrap\n",
+                "# Install the files and packages from the metadata\n",
+                "/opt/aws/bin/cfn-init -v ",
+                " --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                " --resource Ec2InstanceAtlassian ",
+                " --configsets InstallAndRun ",
+                " --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                " || error_exit 'Failed to run cfn-init'\n"
+              ]
+            ]
+          }
+        },
+        "Tags": [
+          {
+            "Key": "name",
+            "Value": "Ec2InstanceAtlassian"
+          },
+          {
+            "Key": "ec2-startstop",
+            "Value": "none;1800;utc;weekdays"
+          }
+        ]
+      }
+    },
+    "Ec2DataVolumeAtlassian": {
+      "Type": "AWS::EC2::Volume",
+      "Properties": {
+        "Size": "50",
+        "AvailabilityZone": {
+          "Fn::GetAtt": [
+            "Ec2InstanceAtlassian",
+            "AvailabilityZone"
+          ]
+        }
+      }
+    },
+    "Ec2DataMountPointAtlassian": {
+      "Type": "AWS::EC2::VolumeAttachment",
+      "DependsOn": "Ec2DataVolumeAtlassian",
+      "Properties": {
+        "InstanceId": {
+          "Ref": "Ec2InstanceAtlassian"
+        },
+        "VolumeId": {
+          "Ref": "Ec2DataVolumeAtlassian"
+        },
+        "Device": "/dev/sdh"
+      }
+    },
+    "SecurityGroupJenkins": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupName": "sgEc2Jenkins",
+        "GroupDescription": "Security group for Jenkins server",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8080,
+            "ToPort": 8080,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 5000,
+            "ToPort": 5000,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "ToPort": 22,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    },
+    "Ec2InstanceJenkins": {
+      "Type": "AWS::EC2::Instance",
+      "Metadata": {
+        "Comment": "EC2 instance to host jenkins in docker containers",
+        "Version": "1.0.0-SNAPSHOT",
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "InstallAndRun": [
+              "1-cfn-base-setup",
+              "2-cfn-base-configuration",
+              "3-cfn-setup",
+              "4-cfn-start-docker-service",
+              "5-cfn-jenkins-docker"
+            ]
+          },
+          "1-cfn-base-setup": {
+            "packages": {
+              "yum": {
+                "mc": [],
+                "docker": []
+              }
+            },
+            "files": {
+              "/etc/cfn/cfn-hup.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "[main]\n",
+                      "stack=",
+                      {
+                        "Ref": "AWS::StackId"
+                      },
+                      "\n",
+                      "region=",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n"
+                    ]
+                  ]
+                },
+                "mode": "000400",
+                "owner": "root",
+                "group": "root"
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "[cfn-auto-reloader-hook]\n",
+                      "triggers=post.update\n",
+                      "path=Resources.Ec2Instance.Metadata.AWS::CloudFormation::Init\n",
+                      "action=/opt/aws/bin/cfn-init -v ",
+                      "         --stack ",
+                      {
+                        "Ref": "AWS::StackName"
+                      },
+                      "         --resource Ec2InstanceJenkins ",
+                      "         --configsets InstallAndRun ",
+                      "         --region ",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n",
+                      "runas=root\n"
+                    ]
+                  ]
+                }
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "cfn-hup": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": [
+                    "/etc/cfn/cfn-hup.conf",
+                    "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                  ]
+                }
+              }
+            }
+          },
+          "2-cfn-base-configuration": {
+            "commands": {
+              "01_01_change_time_zone_to_berlin": {
+                "command": "sed -i 's,^\\(ZONE=\\).*,\\1'Europe/Berlin',' /etc/sysconfig/clock"
+              },
+              "01_02_change_time_zone_to_berlin": {
+                "command": "ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime"
+              },
+              "02_01_enable_ssh_password_authentication": {
+                "command": "sed -i 's/^PasswordAuthentication .*/PasswordAuthentication yes/g' /etc/ssh/sshd_config"
+              },
+              "02_02_enable_member_of_wheel_group_to_run_all_commands": {
+                "command": "sed -i 's/^#\\s*\\(%wheel\\s\\+ALL=(ALL)\\s\\+ALL\\)/\\1/' /etc/sudoers"
+              },
+              "02_03_restart_sshd_service": {
+                "command": "service sshd restart"
+              },
+              "03_01_add_additional_admin_user": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "useradd -m -d /home/",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      },
+                      " ",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      }
+                    ]
+                  ]
+                }
+              },
+              "03_02_set_admin_user_password": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "echo ",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      },
+                      ":",
+                      {
+                        "Ref": "EC2AdminPassword"
+                      },
+                      " | ",
+                      "chpasswd"
+                    ]
+                  ]
+                }
+              },
+              "03_03_add_user_to_admin_group": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "usermod -a -G wheel ",
+                      {
+                        "Ref": "EC2AdminUsername"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          "3-cfn-setup": {
+            "commands": {
+              "02_01_format_the_addition_volume": {
+                "command": "sudo mkfs -t ext4 /dev/sdh"
+              },
+              "02_02_create_application_directory": {
+                "command": ""
+              },
+              "02_03_add_entry_to_fstab": {
+                "command": "echo \"/dev/sdh /opt ext4 defaults,nofail,noatime 1 2\" >> /etc/fstab"
+              },
+              "02_04_add_entry_to_fstab": {
+                "command": "mount -a"
+              }
+            }
+          },
+          "4-cfn-start-docker-service": {
+            "commands": {
+              "01_register_docker_service": {
+                "command": "chkconfig --add docker"
+              },
+              "02_start_docker_service": {
+                "command": "service docker start"
+              }
+            }
+          },
+          "5-cfn-jenkins-docker": {
+            "commands": {
+              "01_pull_docker_image": {
+                "command": "docker pull jenkins/jenkins:lts"
+              },
+              "02_start_docker_image": {
+                "command": "docker run -it --restart=always --name jenkins-instance --publish 8080:8080 --publish 5000:5000 -v /opt/jenkins:/var/jenkins/ -d jenkins/jenkins:lts"
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": {
+          "Ref": "AMI"
+        },
+        "InstanceType": {
+          "Ref": "JenkinsInstanceClass"
+        },
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "SecurityGroupJenkins"
+          }
+        ],
+        "SubnetId": {
+          "Ref": "Subnet"
+        },
+        "Tenancy": "default",
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -v\n",
+                "source /etc/environment\n",
+                "# Wait for the EBS volume to show up\n",
+                "while [ ! -e /dev/sdh ]; do echo waiting for /dev/sdh to attach; sleep 10; done\n",
+                "yum update -y && yum install -y aws-cfn-bootstrap\n",
+                "# Install the files and packages from the metadata\n",
+                "/opt/aws/bin/cfn-init -v ",
+                " --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                " --resource Ec2InstanceJenkins ",
+                " --configsets InstallAndRun ",
+                " --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                " || error_exit 'Failed to run cfn-init'\n"
+              ]
+            ]
+          }
+        },
+        "Tags": [
+          {
+            "Key": "name",
+            "Value": "Ec2InstanceJenkins"
+          },
+          {
+            "Key": "ec2-startstop",
+            "Value": "none;1700;utc;weekdays"
+          }
+        ]
+      }
+    },
+    "Ec2DataVolumeJenkins": {
+      "Type": "AWS::EC2::Volume",
+      "Properties": {
+        "Size": "50",
+        "AvailabilityZone": {
+          "Fn::GetAtt": [
+            "Ec2InstanceJenkins",
+            "AvailabilityZone"
+          ]
+        }
+      }
+    },
+    "Ec2DataMountPointJenkins": {
+      "Type": "AWS::EC2::VolumeAttachment",
+      "DependsOn": "Ec2DataVolumeJenkins",
+      "Properties": {
+        "InstanceId": {
+          "Ref": "Ec2InstanceJenkins"
+        },
+        "VolumeId": {
+          "Ref": "Ec2DataVolumeJenkins"
+        },
+        "Device": "/dev/sdh"
+      }
+    }
+  },
+  "Outputs": {
+    "AvailabilityZone": {
+      "Description": "Availability Zone of the newly created EC2 instance",
+      "Value": {
+        "Fn::GetAtt": [
+          "Ec2InstanceAtlassian",
+          "AvailabilityZone"
+        ]
+      }
+    },
+    "InstanceIdAtlassian": {
+      "Description": "The InstanceId of the newly created EC2 instance for Atlassian",
+      "Value": {
+        "Ref": "Ec2InstanceAtlassian"
+      }
+    },
+    "PrivateIPAtlassian": {
+      "Description": "Private IP address of the newly created EC2 instance for Atlassian",
+      "Value": {
+        "Fn::GetAtt": [
+          "Ec2InstanceAtlassian",
+          "PrivateIp"
+        ]
+      }
+    },
+    "VolumeIdAtlassian": {
+      "Value": {
+        "Ref": "Ec2DataVolumeAtlassian"
+      }
+    },
+    "InstanceIdJenkins": {
+      "Description": "The InstanceId of the newly created EC2 instance for Jenkins",
+      "Value": {
+        "Ref": "Ec2InstanceJenkins"
+      }
+    },
+    "PrivateIPJenkins": {
+      "Description": "Private IP address of the newly created EC2 instance for Jenkins",
+      "Value": {
+        "Fn::GetAtt": [
+          "Ec2InstanceJenkins",
+          "PrivateIp"
+        ]
+      }
+    },
+    "VolumeIdJenkins": {
+      "Value": {
+        "Ref": "Ec2DataVolumeJenkins"
+      }
+    }
+  }
+}

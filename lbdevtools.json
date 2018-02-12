@@ -1,0 +1,734 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "setups up an Application Loadbalancer for devtools stack",
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Network Configuration"
+          },
+          "Parameters": [
+            "LoadBalancerName",
+            "VPC",
+            "EC2SubnetAZa",
+            "EC2SubnetAZb",
+            "HostedZoneName",
+            "SubDomainJira",
+            "SubDomainConfluence",
+            "SubDomainBitbucket",
+            "SubDomainJenkins"
+          ]
+        },
+        {
+          "Label": {
+            "default": "EC2 Configuration"
+          },
+          "Parameters": [
+            "EC2Jira",
+            "EC2Confluence",
+            "EC2Bitbucket",
+            "EC2Jenkins"
+          ]
+        }
+      ]
+    }
+  },
+  "Parameters": {
+    "LoadBalancerName": {
+      "Description": "Name for the loadbalancer",
+      "Type": "String",
+      "MinLength": "1"
+    },
+    "EC2SubnetAZa": {
+      "Description": "Select the subnet for Availability Zone A",
+      "Type": "AWS::EC2::Subnet::Id",
+      "Default": ""
+    },
+    "EC2SubnetAZb": {
+      "Description": "Select the subnet for Availability Zone B",
+      "Type": "AWS::EC2::Subnet::Id",
+      "Default": ""
+    },
+    "EC2Jira": {
+      "Description": "Select the EC2 instance for Jira",
+      "Type": "AWS::EC2::Instance::Id",
+      "Default": "i-0609bc1e7af570e9b"
+    },
+    "EC2Confluence": {
+      "Description": "Select the EC2 instance for Confluence",
+      "Type": "AWS::EC2::Instance::Id",
+      "Default": "i-0d02991deba4f0125"
+    },
+    "EC2Bitbucket": {
+      "Description": "Select the EC2 instance for Confluence",
+      "Type": "AWS::EC2::Instance::Id",
+      "Default": "i-0d02991deba4f0125"
+    },
+    "EC2Jenkins": {
+      "Description": "Select the EC2 instance for Jenkins",
+      "Type": "AWS::EC2::Instance::Id",
+      "Default": "i-0d02991deba4f0125"
+    },
+    "VPC": {
+      "Description": "VpcId of your existing Virtual Private Cloud (VPC)",
+      "Type": "AWS::EC2::VPC::Id",
+      "Default": "vpc-7f550a06"
+    },
+    "SubDomainJira": {
+      "Description": "Subdomain for Jira",
+      "Type": "String",
+      "Default": "jira.ops4devs.de"
+    },
+    "SubDomainConfluence": {
+      "Description": "Subdomain for Confluence",
+      "Type": "String",
+      "Default": "confluence.ops4devs.de"
+    },
+    "SubDomainBitbucket": {
+      "Description": "Subdomain for Bitbucket",
+      "Type": "String",
+      "Default": "bitbucket.ops4devs.de"
+    },
+    "SubDomainJenkins": {
+      "Description": "Subdomain for Bitbucket",
+      "Type": "String",
+      "Default": "jenkins.ops4devs.de"
+    },
+    "HostedZoneName": {
+      "Description": "Hosted zone",
+      "Type": "String",
+      "Default": "ops4devs.de"
+    }
+  },
+  "Resources": {
+    "AtlassianLoadbalancerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupName": "sgLoadbalancerDevtools",
+        "GroupDescription": "Security group for DevTools Loadbalancer",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8080,
+            "ToPort": 8080,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8090,
+            "ToPort": 8091,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 7990,
+            "ToPort": 7990,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    },
+    "ApplicationLB": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "DependsOn": [
+        "AtlassianLoadbalancerSecurityGroup"
+      ],
+      "Properties": {
+        "Name": {
+          "Ref": "LoadBalancerName"
+        },
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "AtlassianLoadbalancerSecurityGroup",
+              "GroupId"
+            ]
+          }
+        ],
+        "Subnets": [
+          {
+            "Ref": "EC2SubnetAZa"
+          },
+          {
+            "Ref": "EC2SubnetAZb"
+          }
+        ],
+        "IpAddressType": "ipv4"
+      }
+    },
+    "RecordsetJira": {
+      "Type": "AWS::Route53::RecordSet",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [
+            ".",
+            [
+              {
+                "Ref": "SubDomainJira"
+              },
+              ""
+            ]
+          ]
+        },
+        "Name": {
+          "Ref": "SubDomainJira"
+        },
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "CanonicalHostedZoneID"
+            ]
+          },
+          "DNSName": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "DNSName"
+            ]
+          }
+        }
+      }
+    },
+    "RecordsetConfluence": {
+      "Type": "AWS::Route53::RecordSet",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [
+            ".",
+            [
+              {
+                "Ref": "SubDomainConfluence"
+              },
+              ""
+            ]
+          ]
+        },
+        "Name": {
+          "Ref": "SubDomainConfluence"
+        },
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "CanonicalHostedZoneID"
+            ]
+          },
+          "DNSName": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "DNSName"
+            ]
+          }
+        }
+      }
+    },
+    "RecordsetBitbucket": {
+      "Type": "AWS::Route53::RecordSet",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [
+            ".",
+            [
+              {
+                "Ref": "SubDomainBitbucket"
+              },
+              ""
+            ]
+          ]
+        },
+        "Name": {
+          "Ref": "SubDomainBitbucket"
+        },
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "CanonicalHostedZoneID"
+            ]
+          },
+          "DNSName": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "DNSName"
+            ]
+          }
+        }
+      }
+    },
+    "RecordsetJenkins": {
+      "Type": "AWS::Route53::RecordSet",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [
+            ".",
+            [
+              {
+                "Ref": "SubDomainJenkins"
+              },
+              ""
+            ]
+          ]
+        },
+        "Name": {
+          "Ref": "SubDomainJenkins"
+        },
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "CanonicalHostedZoneID"
+            ]
+          },
+          "DNSName": {
+            "Fn::GetAtt": [
+              "ApplicationLB",
+              "DNSName"
+            ]
+          }
+        }
+      }
+    },
+    "ApplicationLBGeneralListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "DependsOn": [
+        "ApplicationLBJiraTargetGroup",
+        "ApplicationLBConfluenceTargetGroup",
+        "ApplicationLBBitbucketTargetGroup",
+        "ApplicationLBJenkinsTargetGroup"
+      ],
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBJiraTargetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ApplicationLB"
+        },
+        "Port": 80,
+        "Protocol": "HTTP"
+      }
+    },
+    "ApplicationLBJiraJenkinsPortListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "DependsOn": "ApplicationLBJiraTargetGroup",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBJiraTargetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ApplicationLB"
+        },
+        "Port": 8080,
+        "Protocol": "HTTP"
+      }
+    },
+    "ApplicationLBConfluencePortListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "DependsOn": "ApplicationLBConfluenceTargetGroup",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBConfluenceTargetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ApplicationLB"
+        },
+        "Port": 8090,
+        "Protocol": "HTTP"
+      }
+    },
+    "ApplicationLBBitbucketPortListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "DependsOn": "ApplicationLBBitbucketTargetGroup",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBBitbucketTargetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ApplicationLB"
+        },
+        "Port": 7990,
+        "Protocol": "HTTP"
+      }
+    },
+    "ApplicationLBJenkinsPortRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "DependsOn": [
+        "RecordsetJenkins",
+        "ApplicationLBJiraJenkinsPortListener"
+      ],
+      "Properties": {
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBJenkinsTargetGroup"
+            }
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "host-header",
+            "Values": [
+              {
+                "Ref": "SubDomainJenkins"
+              }
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ApplicationLBJiraJenkinsPortListener"
+        },
+        "Priority": 1
+      }
+    },
+    "ApplicationLBJiraRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "DependsOn": [
+        "RecordsetJira",
+        "ApplicationLBGeneralListener"
+      ],
+      "Properties": {
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBJiraTargetGroup"
+            }
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "host-header",
+            "Values": [
+              {
+                "Ref": "SubDomainJira"
+              }
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ApplicationLBGeneralListener"
+        },
+        "Priority": 1
+      }
+    },
+    "ApplicationLBConfluenceRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "DependsOn": [
+        "RecordsetConfluence",
+        "ApplicationLBGeneralListener"
+      ],
+      "Properties": {
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBConfluenceTargetGroup"
+            }
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "host-header",
+            "Values": [
+              {
+                "Ref": "SubDomainConfluence"
+              }
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ApplicationLBGeneralListener"
+        },
+        "Priority": 2
+      }
+    },
+    "ApplicationLBBitbucketRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "DependsOn": [
+        "RecordsetBitbucket",
+        "ApplicationLBGeneralListener"
+      ],
+      "Properties": {
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBBitbucketTargetGroup"
+            }
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "host-header",
+            "Values": [
+              {
+                "Ref": "SubDomainBitbucket"
+              }
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ApplicationLBGeneralListener"
+        },
+        "Priority": 3
+      }
+    },
+    "ApplicationLBJenkinsRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "DependsOn": [
+        "RecordsetJenkins",
+        "ApplicationLBGeneralListener"
+      ],
+      "Properties": {
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ApplicationLBJenkinsTargetGroup"
+            }
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "host-header",
+            "Values": [
+              {
+                "Ref": "SubDomainJenkins"
+              }
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ApplicationLBGeneralListener"
+        },
+        "Priority": 4
+      }
+    },
+    "ApplicationLBJiraTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/status",
+        "HealthCheckPort": 8080,
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 4,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "Name": "JiraTargetGroup",
+        "Port": 8080,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "300"
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false"
+          },
+          {
+            "Key": "stickiness.type",
+            "Value": "lb_cookie"
+          },
+          {
+            "Key": "stickiness.lb_cookie.duration_seconds",
+            "Value": "86400"
+          }
+        ],
+        "Targets": [
+          {
+            "Id": {
+              "Ref": "EC2Jira"
+            },
+            "Port": 8080
+          }
+        ],
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    },
+    "ApplicationLBConfluenceTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 4,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "Name": "ConfluenceTargetGroup",
+        "Port": 8090,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "20"
+          }
+        ],
+        "Targets": [
+          {
+            "Id": {
+              "Ref": "EC2Confluence"
+            },
+            "Port": 8090
+          }
+        ],
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    },
+    "ApplicationLBBitbucketTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/login.html",
+        "HealthCheckPort": 7990,
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 4,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "Name": "BitbucketTargetGroup",
+        "Port": 7990,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "300"
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false"
+          },
+          {
+            "Key": "stickiness.type",
+            "Value": "lb_cookie"
+          },
+          {
+            "Key": "stickiness.lb_cookie.duration_seconds",
+            "Value": "86400"
+          }
+        ],
+        "Targets": [
+          {
+            "Id": {
+              "Ref": "EC2Bitbucket"
+            },
+            "Port": 7990
+          }
+        ],
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    },
+    "ApplicationLBJenkinsTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/login",
+        "HealthCheckPort": 8080,
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 4,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "Name": "JenkinsTargetGroup",
+        "Port": 8080,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "300"
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false"
+          },
+          {
+            "Key": "stickiness.type",
+            "Value": "lb_cookie"
+          },
+          {
+            "Key": "stickiness.lb_cookie.duration_seconds",
+            "Value": "86400"
+          }
+        ],
+        "Targets": [
+          {
+            "Id": {
+              "Ref": "EC2Jenkins"
+            },
+            "Port": 8080
+          }
+        ],
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Ref": "VPC"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {
+      "Description": "The InstanceId of the newly created ELB instance",
+      "Value": {
+        "Ref": "ApplicationLB"
+      }
+    },
+    "DNSName": {
+      "Description": "DNS name for the ELB",
+      "Value": {
+        "Fn::GetAtt": [
+          "ApplicationLB",
+          "DNSName"
+        ]
+      }
+    }
+  }
+}
