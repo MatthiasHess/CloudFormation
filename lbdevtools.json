@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "setups up an Application Loadbalancer for devtools stack",
+  "Description": "setups up an Application Loadbalancer for devtools stack with Route53 aliases on existing subdomains",
   "Metadata": {
     "AWS::CloudFormation::Interface": {
       "ParameterGroups": [
